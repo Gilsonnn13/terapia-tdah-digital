@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Star, Trophy, Target, Brain, Zap, Award, Settings, BarChart3, Play, Pause, RotateCcw, Heart, Sparkles, Calendar, Puzzle, Lightbulb } from 'lucide-react'
+import { Star, Trophy, Target, Brain, Zap, Award, Settings, BarChart3, Play, Pause, RotateCcw, Heart, Sparkles, Calendar, Puzzle, Lightbulb, LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -10,6 +10,9 @@ import { Badge } from '@/components/ui/badge'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
+import { supabase } from '@/lib/supabase'
+import { useRouter } from 'next/navigation'
+import type { User } from '@supabase/supabase-js'
 
 // Tipos
 interface GameSession {
@@ -37,6 +40,10 @@ interface GameSettings {
 }
 
 export default function FocusTherapyApp() {
+  const router = useRouter()
+  const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
+
   // Estados principais
   const [activeTab, setActiveTab] = useState('games')
   const [userProgress, setUserProgress] = useState<UserProgress>({
@@ -105,38 +112,130 @@ export default function FocusTherapyApp() {
     { title: "Campeão da Precisão", description: "Consiga 95% de precisão em qualquer jogo", completed: false }
   ]
 
-  // Carregar dados do localStorage
+  // Verificar autenticação e carregar dados
   useEffect(() => {
-    const savedProgress = localStorage.getItem('focusTherapyProgress')
-    const savedSettings = localStorage.getItem('focusTherapySettings')
+    checkUser()
     
-    if (savedProgress) {
-      setUserProgress(JSON.parse(savedProgress))
-    }
-    if (savedSettings) {
-      setSettings(JSON.parse(savedSettings))
-    }
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUser(session.user)
+        loadUserData(session.user.id)
+      } else {
+        router.push('/login')
+      }
+    })
 
-    // Inicializar desafio semanal
-    const savedChallenge = localStorage.getItem('weeklyChallenge')
-    if (savedChallenge) {
-      setWeeklyChallenge(JSON.parse(savedChallenge))
-    } else {
-      const randomChallenge = weeklyChallenges[Math.floor(Math.random() * weeklyChallenges.length)]
-      setWeeklyChallenge(randomChallenge)
-      localStorage.setItem('weeklyChallenge', JSON.stringify(randomChallenge))
+    return () => subscription.unsubscribe()
+  }, [router])
+
+  const checkUser = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user) {
+        setUser(session.user)
+        await loadUserData(session.user.id)
+      } else {
+        router.push('/login')
+      }
+    } catch (error) {
+      console.error('Erro ao verificar usuário:', error)
+      router.push('/login')
+    } finally {
+      setLoading(false)
     }
-  }, [])
+  }
 
-  // Salvar progresso
-  useEffect(() => {
-    localStorage.setItem('focusTherapyProgress', JSON.stringify(userProgress))
-  }, [userProgress])
+  const loadUserData = async (userId: string) => {
+    try {
+      // Carregar progresso do usuário
+      const { data: progressData, error: progressError } = await supabase
+        .from('user_progress')
+        .select('*')
+        .eq('user_id', userId)
+        .single()
 
-  // Salvar configurações
-  useEffect(() => {
-    localStorage.setItem('focusTherapySettings', JSON.stringify(settings))
-  }, [settings])
+      if (progressError && progressError.code !== 'PGRST116') {
+        console.error('Erro ao carregar progresso:', progressError)
+      }
+
+      if (progressData) {
+        setUserProgress({
+          totalPoints: progressData.total_points,
+          gamesPlayed: progressData.games_played,
+          achievements: progressData.achievements || [],
+          sessions: [],
+          level: progressData.level,
+          streak: progressData.streak
+        })
+      } else {
+        // Criar progresso inicial
+        await supabase.from('user_progress').insert({
+          user_id: userId,
+          total_points: 0,
+          games_played: 0,
+          level: 1,
+          streak: 0,
+          achievements: []
+        })
+      }
+
+      // Carregar sessões de jogo
+      const { data: sessionsData } = await supabase
+        .from('game_sessions')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(10)
+
+      if (sessionsData) {
+        const sessions = sessionsData.map(s => ({
+          gameId: s.game_id,
+          score: s.score,
+          duration: s.duration,
+          accuracy: s.accuracy,
+          date: s.created_at
+        }))
+        setUserProgress(prev => ({ ...prev, sessions }))
+      }
+
+      // Carregar desafio semanal
+      const { data: challengeData } = await supabase
+        .from('weekly_challenges')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (challengeData) {
+        setWeeklyChallenge({
+          title: challengeData.title,
+          description: challengeData.description,
+          completed: challengeData.completed
+        })
+      } else {
+        // Criar desafio semanal inicial
+        const randomChallenge = weeklyChallenges[Math.floor(Math.random() * weeklyChallenges.length)]
+        await supabase.from('weekly_challenges').insert({
+          user_id: userId,
+          title: randomChallenge.title,
+          description: randomChallenge.description,
+          completed: false
+        })
+        setWeeklyChallenge(randomChallenge)
+      }
+
+    } catch (error) {
+      console.error('Erro ao carregar dados:', error)
+    }
+  }
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push('/login')
+  }
 
   // Timer do jogo
   useEffect(() => {
@@ -432,53 +531,89 @@ export default function FocusTherapyApp() {
     setIsPlaying(true)
   }
 
-  const completeWeeklyChallenge = () => {
-    if (!isPlaying) return
+  const completeWeeklyChallenge = async () => {
+    if (!isPlaying || !user) return
     
     const points = 200
     setGameScore(points)
     
     const updatedChallenge = { ...weeklyChallenge, completed: true }
     setWeeklyChallenge(updatedChallenge)
-    localStorage.setItem('weeklyChallenge', JSON.stringify(updatedChallenge))
+    
+    // Atualizar no banco
+    await supabase
+      .from('weekly_challenges')
+      .update({ completed: true, completed_at: new Date().toISOString() })
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
     
     endGame('weeklyChallenge', points)
   }
 
   // Finalizar jogo
-  const endGame = (gameId: string, finalScore: number) => {
+  const endGame = async (gameId: string, finalScore: number) => {
+    if (!user) return
+    
     setIsPlaying(false)
     
-    const session: GameSession = {
-      gameId,
-      score: finalScore,
-      duration: gameTime,
-      accuracy: gameId === 'sustainedFocus' ? focusAccuracy : 
+    const accuracy = gameId === 'sustainedFocus' ? focusAccuracy : 
                 gameId === 'selectiveAttention' ? (correctClicks / 20) * 100 : 
                 gameId === 'puzzle' ? (puzzleCompleted ? 100 : 0) :
                 gameId === 'logicSequence' ? (logicCorrectAnswers / 10) * 100 :
                 gameId === 'weeklyChallenge' ? 100 :
-                (colorSequence.length / 10) * 100,
-      date: new Date().toISOString()
-    }
-    
-    const newProgress = {
-      ...userProgress,
-      totalPoints: userProgress.totalPoints + finalScore,
-      gamesPlayed: userProgress.gamesPlayed + 1,
-      sessions: [...userProgress.sessions, session],
-      level: Math.floor((userProgress.totalPoints + finalScore) / 500) + 1
-    }
-    
+                (colorSequence.length / 10) * 100
+
+    // Salvar sessão no banco
+    await supabase.from('game_sessions').insert({
+      user_id: user.id,
+      game_id: gameId,
+      score: finalScore,
+      duration: gameTime,
+      accuracy: accuracy
+    })
+
+    // Atualizar progresso
+    const newTotalPoints = userProgress.totalPoints + finalScore
+    const newGamesPlayed = userProgress.gamesPlayed + 1
+    const newLevel = Math.floor(newTotalPoints / 500) + 1
+    const newAchievements = [...userProgress.achievements]
+
     // Verificar conquistas
-    if (finalScore > 100 && !newProgress.achievements.includes('first100')) {
-      newProgress.achievements.push('first100')
+    if (finalScore > 100 && !newAchievements.includes('first100')) {
+      newAchievements.push('first100')
     }
-    if (newProgress.gamesPlayed >= 10 && !newProgress.achievements.includes('dedicated')) {
-      newProgress.achievements.push('dedicated')
+    if (newGamesPlayed >= 10 && !newAchievements.includes('dedicated')) {
+      newAchievements.push('dedicated')
     }
+    if (newLevel >= 5 && !newAchievements.includes('master')) {
+      newAchievements.push('master')
+    }
+
+    // Atualizar no banco
+    await supabase
+      .from('user_progress')
+      .update({
+        total_points: newTotalPoints,
+        games_played: newGamesPlayed,
+        level: newLevel,
+        achievements: newAchievements,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', user.id)
+
+    // Atualizar estado local
+    setUserProgress({
+      ...userProgress,
+      totalPoints: newTotalPoints,
+      gamesPlayed: newGamesPlayed,
+      level: newLevel,
+      achievements: newAchievements
+    })
+
+    // Recarregar dados
+    await loadUserData(user.id)
     
-    setUserProgress(newProgress)
     setActiveGame(null)
   }
 
@@ -552,6 +687,17 @@ export default function FocusTherapyApp() {
     { id: 'master', name: 'Mestre', description: 'Alcançou nível 5', icon: Award }
   ]
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 flex items-center justify-center">
+        <div className="text-center">
+          <Sparkles className="w-16 h-16 text-purple-600 animate-spin mx-auto mb-4" />
+          <p className="text-lg text-gray-700">Carregando...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 p-4 sm:p-6 md:p-8">
       <div className="max-w-7xl mx-auto">
@@ -565,6 +711,18 @@ export default function FocusTherapyApp() {
             <Sparkles className="w-8 h-8 sm:w-10 sm:h-10 text-pink-600" />
           </div>
           <p className="text-base sm:text-lg text-gray-700">Treine sua atenção de forma divertida!</p>
+          <div className="flex items-center justify-center gap-2 mt-2">
+            <p className="text-sm text-gray-600">Olá, {user?.email}</p>
+            <Button
+              onClick={handleLogout}
+              variant="ghost"
+              size="sm"
+              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+            >
+              <LogOut className="w-4 h-4 mr-1" />
+              Sair
+            </Button>
+          </div>
         </div>
 
         {/* Desafio Semanal Banner */}
@@ -983,7 +1141,7 @@ export default function FocusTherapyApp() {
                     Últimas Sessões
                   </h3>
                   <div className="space-y-2 sm:space-y-3">
-                    {userProgress.sessions.slice(-5).reverse().map((session, index) => (
+                    {userProgress.sessions.slice(0, 5).map((session, index) => (
                       <Card key={index} className="bg-gradient-to-r from-purple-50 to-pink-50">
                         <CardContent className="p-3 sm:p-4">
                           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
@@ -1105,29 +1263,6 @@ export default function FocusTherapyApp() {
                     checked={settings.vibrationEnabled}
                     onCheckedChange={(checked) => setSettings({...settings, vibrationEnabled: checked})}
                   />
-                </div>
-
-                {/* Resetar Progresso */}
-                <div className="pt-4 sm:pt-6 border-t">
-                  <Button 
-                    variant="destructive"
-                    className="w-full py-5 sm:py-6 text-base sm:text-lg"
-                    onClick={() => {
-                      if (confirm('Tem certeza que deseja resetar todo o progresso?')) {
-                        setUserProgress({
-                          totalPoints: 0,
-                          gamesPlayed: 0,
-                          achievements: [],
-                          sessions: [],
-                          level: 1,
-                          streak: 0
-                        })
-                      }
-                    }}
-                  >
-                    <RotateCcw className="w-5 h-5 mr-2" />
-                    Resetar Progresso
-                  </Button>
                 </div>
               </CardContent>
             </Card>
