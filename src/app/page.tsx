@@ -149,18 +149,36 @@ export default function FocusTherapyApp() {
 
   const loadUserData = async (userId: string) => {
     try {
+      console.log('Carregando dados do usuário:', userId)
+      
       // Carregar progresso do usuário
       const { data: progressData, error: progressError } = await supabase
         .from('user_progress')
         .select('*')
         .eq('user_id', userId)
-        .single()
+        .maybeSingle()
 
-      if (progressError && progressError.code !== 'PGRST116') {
+      if (progressError) {
         console.error('Erro ao carregar progresso:', progressError)
+        // Se erro de permissão, tentar criar registro
+        if (progressError.code === 'PGRST301' || progressError.message.includes('permission')) {
+          console.log('Tentando criar progresso inicial...')
+          const { error: insertError } = await supabase.from('user_progress').insert({
+            user_id: userId,
+            total_points: 0,
+            games_played: 0,
+            level: 1,
+            streak: 0,
+            achievements: []
+          })
+          if (insertError) {
+            console.error('Erro ao criar progresso:', insertError)
+          }
+        }
       }
 
       if (progressData) {
+        console.log('Progresso carregado:', progressData)
         setUserProgress({
           totalPoints: progressData.total_points,
           gamesPlayed: progressData.games_played,
@@ -170,8 +188,9 @@ export default function FocusTherapyApp() {
           streak: progressData.streak
         })
       } else {
+        console.log('Nenhum progresso encontrado, criando inicial...')
         // Criar progresso inicial
-        await supabase.from('user_progress').insert({
+        const { error: insertError } = await supabase.from('user_progress').insert({
           user_id: userId,
           total_points: 0,
           games_played: 0,
@@ -179,17 +198,24 @@ export default function FocusTherapyApp() {
           streak: 0,
           achievements: []
         })
+        
+        if (insertError) {
+          console.error('Erro ao criar progresso inicial:', insertError)
+        }
       }
 
       // Carregar sessões de jogo
-      const { data: sessionsData } = await supabase
+      const { data: sessionsData, error: sessionsError } = await supabase
         .from('game_sessions')
         .select('*')
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(10)
 
-      if (sessionsData) {
+      if (sessionsError) {
+        console.error('Erro ao carregar sessões:', sessionsError)
+      } else if (sessionsData) {
+        console.log('Sessões carregadas:', sessionsData.length)
         const sessions = sessionsData.map(s => ({
           gameId: s.game_id,
           score: s.score,
@@ -201,34 +227,45 @@ export default function FocusTherapyApp() {
       }
 
       // Carregar desafio semanal
-      const { data: challengeData } = await supabase
+      const { data: challengeData, error: challengeError } = await supabase
         .from('weekly_challenges')
         .select('*')
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single()
+        .maybeSingle()
+
+      if (challengeError) {
+        console.error('Erro ao carregar desafio:', challengeError)
+      }
 
       if (challengeData) {
+        console.log('Desafio carregado:', challengeData)
         setWeeklyChallenge({
           title: challengeData.title,
           description: challengeData.description,
           completed: challengeData.completed
         })
       } else {
+        console.log('Criando desafio semanal inicial...')
         // Criar desafio semanal inicial
         const randomChallenge = weeklyChallenges[Math.floor(Math.random() * weeklyChallenges.length)]
-        await supabase.from('weekly_challenges').insert({
+        const { error: insertError } = await supabase.from('weekly_challenges').insert({
           user_id: userId,
           title: randomChallenge.title,
           description: randomChallenge.description,
           completed: false
         })
-        setWeeklyChallenge(randomChallenge)
+        
+        if (insertError) {
+          console.error('Erro ao criar desafio:', insertError)
+        } else {
+          setWeeklyChallenge(randomChallenge)
+        }
       }
 
     } catch (error) {
-      console.error('Erro ao carregar dados:', error)
+      console.error('Erro geral ao carregar dados:', error)
     }
   }
 
@@ -541,12 +578,16 @@ export default function FocusTherapyApp() {
     setWeeklyChallenge(updatedChallenge)
     
     // Atualizar no banco
-    await supabase
+    const { error } = await supabase
       .from('weekly_challenges')
       .update({ completed: true, completed_at: new Date().toISOString() })
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(1)
+    
+    if (error) {
+      console.error('Erro ao atualizar desafio:', error)
+    }
     
     endGame('weeklyChallenge', points)
   }
@@ -565,13 +606,17 @@ export default function FocusTherapyApp() {
                 (colorSequence.length / 10) * 100
 
     // Salvar sessão no banco
-    await supabase.from('game_sessions').insert({
+    const { error: sessionError } = await supabase.from('game_sessions').insert({
       user_id: user.id,
       game_id: gameId,
       score: finalScore,
       duration: gameTime,
       accuracy: accuracy
     })
+
+    if (sessionError) {
+      console.error('Erro ao salvar sessão:', sessionError)
+    }
 
     // Atualizar progresso
     const newTotalPoints = userProgress.totalPoints + finalScore
@@ -591,7 +636,7 @@ export default function FocusTherapyApp() {
     }
 
     // Atualizar no banco
-    await supabase
+    const { error: updateError } = await supabase
       .from('user_progress')
       .update({
         total_points: newTotalPoints,
@@ -601,6 +646,10 @@ export default function FocusTherapyApp() {
         updated_at: new Date().toISOString()
       })
       .eq('user_id', user.id)
+
+    if (updateError) {
+      console.error('Erro ao atualizar progresso:', updateError)
+    }
 
     // Atualizar estado local
     setUserProgress({
@@ -726,7 +775,7 @@ export default function FocusTherapyApp() {
         </div>
 
         {/* Desafio Semanal Banner */}
-        {!weeklyChallenge.completed && (
+        {weeklyChallenge.title && !weeklyChallenge.completed && (
           <Card className="mb-6 border-0 shadow-xl bg-gradient-to-r from-yellow-400 to-orange-500">
             <CardContent className="p-4 sm:p-6">
               <div className="flex items-center gap-3">
@@ -988,8 +1037,6 @@ export default function FocusTherapyApp() {
                       <div className="max-w-md mx-auto">
                         <div className="grid grid-cols-3 gap-2 bg-gradient-to-br from-orange-50 to-red-50 p-4 rounded-2xl border-4 border-orange-300">
                           {puzzlePieces.map((piece) => {
-                            const row = Math.floor(piece.position / 3)
-                            const col = piece.position % 3
                             const isEmpty = piece.position === 8
                             
                             return (
