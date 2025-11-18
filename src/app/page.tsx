@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Star, Trophy, Target, Brain, Zap, Award, Settings, BarChart3, Play, Pause, RotateCcw, Heart, Sparkles, Calendar, Puzzle, Lightbulb, LogOut } from 'lucide-react'
+import { Star, Trophy, Target, Brain, Zap, Award, Settings, BarChart3, Play, Pause, RotateCcw, Heart, Sparkles, Calendar, Puzzle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -10,9 +10,6 @@ import { Badge } from '@/components/ui/badge'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import { supabase } from '@/lib/supabase'
-import { useRouter } from 'next/navigation'
-import type { User } from '@supabase/supabase-js'
 
 // Tipos
 interface GameSession {
@@ -40,10 +37,6 @@ interface GameSettings {
 }
 
 export default function FocusTherapyApp() {
-  const router = useRouter()
-  const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
-
   // Estados principais
   const [activeTab, setActiveTab] = useState('games')
   const [userProgress, setUserProgress] = useState<UserProgress>({
@@ -88,13 +81,6 @@ export default function FocusTherapyApp() {
   const [puzzleMoves, setPuzzleMoves] = useState(0)
   const [puzzleCompleted, setPuzzleCompleted] = useState(false)
 
-  // Jogo de Sequência Lógica
-  const [logicSequence, setLogicSequence] = useState<string[]>([])
-  const [logicOptions, setLogicOptions] = useState<string[]>([])
-  const [logicCorrectAnswer, setLogicCorrectAnswer] = useState<string>('')
-  const [logicRound, setLogicRound] = useState(0)
-  const [logicCorrectAnswers, setLogicCorrectAnswers] = useState(0)
-
   // Desafios Semanais
   const [weeklyChallenge, setWeeklyChallenge] = useState<{title: string, description: string, completed: boolean}>({
     title: '',
@@ -112,130 +98,38 @@ export default function FocusTherapyApp() {
     { title: "Campeão da Precisão", description: "Consiga 95% de precisão em qualquer jogo", completed: false }
   ]
 
-  // Verificar autenticação e carregar dados
+  // Carregar dados do localStorage
   useEffect(() => {
-    checkUser()
+    const savedProgress = localStorage.getItem('focusTherapyProgress')
+    const savedSettings = localStorage.getItem('focusTherapySettings')
     
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        setUser(session.user)
-        loadUserData(session.user.id)
-      } else {
-        router.push('/login')
-      }
-    })
-
-    return () => subscription.unsubscribe()
-  }, [router])
-
-  const checkUser = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session?.user) {
-        setUser(session.user)
-        await loadUserData(session.user.id)
-      } else {
-        router.push('/login')
-      }
-    } catch (error) {
-      console.error('Erro ao verificar usuário:', error)
-      router.push('/login')
-    } finally {
-      setLoading(false)
+    if (savedProgress) {
+      setUserProgress(JSON.parse(savedProgress))
     }
-  }
-
-  const loadUserData = async (userId: string) => {
-    try {
-      // Carregar progresso do usuário
-      const { data: progressData, error: progressError } = await supabase
-        .from('user_progress')
-        .select('*')
-        .eq('user_id', userId)
-        .single()
-
-      if (progressError && progressError.code !== 'PGRST116') {
-        console.error('Erro ao carregar progresso:', progressError)
-      }
-
-      if (progressData) {
-        setUserProgress({
-          totalPoints: progressData.total_points,
-          gamesPlayed: progressData.games_played,
-          achievements: progressData.achievements || [],
-          sessions: [],
-          level: progressData.level,
-          streak: progressData.streak
-        })
-      } else {
-        // Criar progresso inicial
-        await supabase.from('user_progress').insert({
-          user_id: userId,
-          total_points: 0,
-          games_played: 0,
-          level: 1,
-          streak: 0,
-          achievements: []
-        })
-      }
-
-      // Carregar sessões de jogo
-      const { data: sessionsData } = await supabase
-        .from('game_sessions')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(10)
-
-      if (sessionsData) {
-        const sessions = sessionsData.map(s => ({
-          gameId: s.game_id,
-          score: s.score,
-          duration: s.duration,
-          accuracy: s.accuracy,
-          date: s.created_at
-        }))
-        setUserProgress(prev => ({ ...prev, sessions }))
-      }
-
-      // Carregar desafio semanal
-      const { data: challengeData } = await supabase
-        .from('weekly_challenges')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
-
-      if (challengeData) {
-        setWeeklyChallenge({
-          title: challengeData.title,
-          description: challengeData.description,
-          completed: challengeData.completed
-        })
-      } else {
-        // Criar desafio semanal inicial
-        const randomChallenge = weeklyChallenges[Math.floor(Math.random() * weeklyChallenges.length)]
-        await supabase.from('weekly_challenges').insert({
-          user_id: userId,
-          title: randomChallenge.title,
-          description: randomChallenge.description,
-          completed: false
-        })
-        setWeeklyChallenge(randomChallenge)
-      }
-
-    } catch (error) {
-      console.error('Erro ao carregar dados:', error)
+    if (savedSettings) {
+      setSettings(JSON.parse(savedSettings))
     }
-  }
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    router.push('/login')
-  }
+    // Inicializar desafio semanal
+    const savedChallenge = localStorage.getItem('weeklyChallenge')
+    if (savedChallenge) {
+      setWeeklyChallenge(JSON.parse(savedChallenge))
+    } else {
+      const randomChallenge = weeklyChallenges[Math.floor(Math.random() * weeklyChallenges.length)]
+      setWeeklyChallenge(randomChallenge)
+      localStorage.setItem('weeklyChallenge', JSON.stringify(randomChallenge))
+    }
+  }, [])
+
+  // Salvar progresso
+  useEffect(() => {
+    localStorage.setItem('focusTherapyProgress', JSON.stringify(userProgress))
+  }, [userProgress])
+
+  // Salvar configurações
+  useEffect(() => {
+    localStorage.setItem('focusTherapySettings', JSON.stringify(settings))
+  }, [settings])
 
   // Timer do jogo
   useEffect(() => {
@@ -463,66 +357,6 @@ export default function FocusTherapyApp() {
     }
   }
 
-  // Iniciar Jogo de Sequência Lógica
-  const startLogicSequenceGame = () => {
-    setActiveGame('logicSequence')
-    setGameScore(0)
-    setGameTime(0)
-    setIsPlaying(true)
-    setLogicRound(0)
-    setLogicCorrectAnswers(0)
-    generateLogicSequence()
-  }
-
-  const generateLogicSequence = () => {
-    const patterns = [
-      // Padrão de cores alternadas
-      { sequence: ['🔴', '🔵', '🔴', '🔵', '🔴'], answer: '🔵', options: ['🔵', '🔴', '🟢', '🟡'] },
-      // Padrão crescente de números
-      { sequence: ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'], answer: '6️⃣', options: ['6️⃣', '5️⃣', '7️⃣', '4️⃣'] },
-      // Padrão de formas
-      { sequence: ['⭐', '⭐', '🔷', '⭐', '⭐'], answer: '🔷', options: ['🔷', '⭐', '🔶', '⬛'] },
-      // Padrão ABC
-      { sequence: ['🍎', '🍌', '🍒', '🍎', '🍌'], answer: '🍒', options: ['🍒', '🍎', '🍌', '🍇'] },
-      // Padrão de tamanhos
-      { sequence: ['⚫', '⚪', '⚫', '⚪', '⚫'], answer: '⚪', options: ['⚪', '⚫', '🔵', '🔴'] },
-      // Padrão de animais
-      { sequence: ['🐶', '🐱', '🐶', '🐱', '🐶'], answer: '🐱', options: ['🐱', '🐶', '🐭', '🐹'] },
-      // Padrão numérico +2
-      { sequence: ['2️⃣', '4️⃣', '6️⃣', '8️⃣'], answer: '🔟', options: ['🔟', '9️⃣', '7️⃣', '5️⃣'] },
-      // Padrão de corações
-      { sequence: ['❤️', '💛', '💚', '❤️', '💛'], answer: '💚', options: ['💚', '❤️', '💙', '💜'] }
-    ]
-
-    const pattern = patterns[Math.floor(Math.random() * patterns.length)]
-    setLogicSequence(pattern.sequence)
-    setLogicCorrectAnswer(pattern.answer)
-    
-    // Embaralhar opções
-    const shuffledOptions = [...pattern.options].sort(() => Math.random() - 0.5)
-    setLogicOptions(shuffledOptions)
-  }
-
-  const handleLogicAnswer = (answer: string) => {
-    if (!isPlaying) return
-
-    if (answer === logicCorrectAnswer) {
-      const points = 50
-      setGameScore(prev => prev + points)
-      setLogicCorrectAnswers(prev => prev + 1)
-      setLogicRound(prev => prev + 1)
-
-      if (logicRound + 1 >= 10) {
-        endGame('logicSequence', gameScore + points)
-      } else {
-        setTimeout(() => generateLogicSequence(), 1000)
-      }
-    } else {
-      setGameScore(prev => Math.max(0, prev - 10))
-      setTimeout(() => generateLogicSequence(), 1000)
-    }
-  }
-
   // Iniciar Desafio Semanal
   const startWeeklyChallengeGame = () => {
     setActiveGame('weeklyChallenge')
@@ -531,89 +365,52 @@ export default function FocusTherapyApp() {
     setIsPlaying(true)
   }
 
-  const completeWeeklyChallenge = async () => {
-    if (!isPlaying || !user) return
+  const completeWeeklyChallenge = () => {
+    if (!isPlaying) return
     
     const points = 200
     setGameScore(points)
     
     const updatedChallenge = { ...weeklyChallenge, completed: true }
     setWeeklyChallenge(updatedChallenge)
-    
-    // Atualizar no banco
-    await supabase
-      .from('weekly_challenges')
-      .update({ completed: true, completed_at: new Date().toISOString() })
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
+    localStorage.setItem('weeklyChallenge', JSON.stringify(updatedChallenge))
     
     endGame('weeklyChallenge', points)
   }
 
   // Finalizar jogo
-  const endGame = async (gameId: string, finalScore: number) => {
-    if (!user) return
-    
+  const endGame = (gameId: string, finalScore: number) => {
     setIsPlaying(false)
     
-    const accuracy = gameId === 'sustainedFocus' ? focusAccuracy : 
-                gameId === 'selectiveAttention' ? (correctClicks / 20) * 100 : 
-                gameId === 'puzzle' ? (puzzleCompleted ? 100 : 0) :
-                gameId === 'logicSequence' ? (logicCorrectAnswers / 10) * 100 :
-                gameId === 'weeklyChallenge' ? 100 :
-                (colorSequence.length / 10) * 100
-
-    // Salvar sessão no banco
-    await supabase.from('game_sessions').insert({
-      user_id: user.id,
-      game_id: gameId,
+    const session: GameSession = {
+      gameId,
       score: finalScore,
       duration: gameTime,
-      accuracy: accuracy
-    })
-
-    // Atualizar progresso
-    const newTotalPoints = userProgress.totalPoints + finalScore
-    const newGamesPlayed = userProgress.gamesPlayed + 1
-    const newLevel = Math.floor(newTotalPoints / 500) + 1
-    const newAchievements = [...userProgress.achievements]
-
-    // Verificar conquistas
-    if (finalScore > 100 && !newAchievements.includes('first100')) {
-      newAchievements.push('first100')
+      accuracy: gameId === 'sustainedFocus' ? focusAccuracy : 
+                gameId === 'selectiveAttention' ? (correctClicks / 20) * 100 : 
+                gameId === 'puzzle' ? (puzzleCompleted ? 100 : 0) :
+                gameId === 'weeklyChallenge' ? 100 :
+                (colorSequence.length / 10) * 100,
+      date: new Date().toISOString()
     }
-    if (newGamesPlayed >= 10 && !newAchievements.includes('dedicated')) {
-      newAchievements.push('dedicated')
-    }
-    if (newLevel >= 5 && !newAchievements.includes('master')) {
-      newAchievements.push('master')
-    }
-
-    // Atualizar no banco
-    await supabase
-      .from('user_progress')
-      .update({
-        total_points: newTotalPoints,
-        games_played: newGamesPlayed,
-        level: newLevel,
-        achievements: newAchievements,
-        updated_at: new Date().toISOString()
-      })
-      .eq('user_id', user.id)
-
-    // Atualizar estado local
-    setUserProgress({
-      ...userProgress,
-      totalPoints: newTotalPoints,
-      gamesPlayed: newGamesPlayed,
-      level: newLevel,
-      achievements: newAchievements
-    })
-
-    // Recarregar dados
-    await loadUserData(user.id)
     
+    const newProgress = {
+      ...userProgress,
+      totalPoints: userProgress.totalPoints + finalScore,
+      gamesPlayed: userProgress.gamesPlayed + 1,
+      sessions: [...userProgress.sessions, session],
+      level: Math.floor((userProgress.totalPoints + finalScore) / 500) + 1
+    }
+    
+    // Verificar conquistas
+    if (finalScore > 100 && !newProgress.achievements.includes('first100')) {
+      newProgress.achievements.push('first100')
+    }
+    if (newProgress.gamesPlayed >= 10 && !newProgress.achievements.includes('dedicated')) {
+      newProgress.achievements.push('dedicated')
+    }
+    
+    setUserProgress(newProgress)
     setActiveGame(null)
   }
 
@@ -664,14 +461,6 @@ export default function FocusTherapyApp() {
       action: startPuzzleGame
     },
     {
-      id: 'logicSequence',
-      title: 'Sequência Lógica',
-      description: 'Descubra o próximo elemento da sequência',
-      icon: Lightbulb,
-      color: 'from-amber-400 to-yellow-500',
-      action: startLogicSequenceGame
-    },
-    {
       id: 'weeklyChallenge',
       title: 'Desafio Semanal',
       description: 'Complete o desafio da semana',
@@ -687,17 +476,6 @@ export default function FocusTherapyApp() {
     { id: 'master', name: 'Mestre', description: 'Alcançou nível 5', icon: Award }
   ]
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 flex items-center justify-center">
-        <div className="text-center">
-          <Sparkles className="w-16 h-16 text-purple-600 animate-spin mx-auto mb-4" />
-          <p className="text-lg text-gray-700">Carregando...</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 p-4 sm:p-6 md:p-8">
       <div className="max-w-7xl mx-auto">
@@ -711,18 +489,6 @@ export default function FocusTherapyApp() {
             <Sparkles className="w-8 h-8 sm:w-10 sm:h-10 text-pink-600" />
           </div>
           <p className="text-base sm:text-lg text-gray-700">Treine sua atenção de forma divertida!</p>
-          <div className="flex items-center justify-center gap-2 mt-2">
-            <p className="text-sm text-gray-600">Olá, {user?.email}</p>
-            <Button
-              onClick={handleLogout}
-              variant="ghost"
-              size="sm"
-              className="text-red-600 hover:text-red-700 hover:bg-red-50"
-            >
-              <LogOut className="w-4 h-4 mr-1" />
-              Sair
-            </Button>
-          </div>
         </div>
 
         {/* Desafio Semanal Banner */}
@@ -1021,53 +787,6 @@ export default function FocusTherapyApp() {
                     </div>
                   )}
 
-                  {/* Jogo de Sequência Lógica */}
-                  {activeGame === 'logicSequence' && (
-                    <div className="space-y-4 sm:space-y-6">
-                      <div className="text-center">
-                        <p className="text-base sm:text-lg font-semibold mb-2">
-                          Qual é o próximo elemento?
-                        </p>
-                        <Badge variant="secondary" className="text-sm sm:text-base px-3 sm:px-4 py-1 sm:py-2">
-                          Rodada: {logicRound + 1}/10 | Acertos: {logicCorrectAnswers}
-                        </Badge>
-                        <Progress value={(logicRound / 10) * 100} className="mt-2" />
-                      </div>
-                      
-                      <div className="max-w-2xl mx-auto">
-                        {/* Sequência */}
-                        <Card className="bg-gradient-to-br from-amber-50 to-yellow-50 border-2 border-amber-300 mb-6">
-                          <CardContent className="p-6">
-                            <div className="flex items-center justify-center gap-3 sm:gap-4 flex-wrap">
-                              {logicSequence.map((item, index) => (
-                                <div key={index} className="text-4xl sm:text-5xl">
-                                  {item}
-                                </div>
-                              ))}
-                              <div className="text-4xl sm:text-5xl font-bold text-amber-600">
-                                ?
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        {/* Opções */}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-                          {logicOptions.map((option, index) => (
-                            <button
-                              key={index}
-                              onClick={() => handleLogicAnswer(option)}
-                              disabled={!isPlaying}
-                              className="aspect-square bg-white hover:bg-amber-100 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 flex items-center justify-center text-5xl sm:text-6xl border-4 border-amber-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              {option}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
                   {/* Desafio Semanal */}
                   {activeGame === 'weeklyChallenge' && (
                     <div className="space-y-4 sm:space-y-6">
@@ -1141,7 +860,7 @@ export default function FocusTherapyApp() {
                     Últimas Sessões
                   </h3>
                   <div className="space-y-2 sm:space-y-3">
-                    {userProgress.sessions.slice(0, 5).map((session, index) => (
+                    {userProgress.sessions.slice(-5).reverse().map((session, index) => (
                       <Card key={index} className="bg-gradient-to-r from-purple-50 to-pink-50">
                         <CardContent className="p-3 sm:p-4">
                           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
@@ -1263,6 +982,29 @@ export default function FocusTherapyApp() {
                     checked={settings.vibrationEnabled}
                     onCheckedChange={(checked) => setSettings({...settings, vibrationEnabled: checked})}
                   />
+                </div>
+
+                {/* Resetar Progresso */}
+                <div className="pt-4 sm:pt-6 border-t">
+                  <Button 
+                    variant="destructive"
+                    className="w-full py-5 sm:py-6 text-base sm:text-lg"
+                    onClick={() => {
+                      if (confirm('Tem certeza que deseja resetar todo o progresso?')) {
+                        setUserProgress({
+                          totalPoints: 0,
+                          gamesPlayed: 0,
+                          achievements: [],
+                          sessions: [],
+                          level: 1,
+                          streak: 0
+                        })
+                      }
+                    }}
+                  >
+                    <RotateCcw className="w-5 h-5 mr-2" />
+                    Resetar Progresso
+                  </Button>
                 </div>
               </CardContent>
             </Card>
