@@ -19,6 +19,59 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "FocusPlay - Terapia Digital para TDAH",
   description: "App de terapia digital que ajuda crianças com TDAH a melhorar suas habilidades de atenção e foco através de jogos interativos",
+  keywords: ["TDAH", "terapia", "atenção", "foco", "jogos", "crianças", "educação"],
+  authors: [{ name: "FocusPlay Team" }],
+  creator: "FocusPlay",
+  publisher: "FocusPlay",
+  formatDetection: {
+    email: false,
+    address: false,
+    telephone: false,
+  },
+  metadataBase: new URL("https://focusplay.app"), // Substitua pela sua URL real
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    title: "FocusPlay - Terapia Digital para TDAH",
+    description: "App de terapia digital que ajuda crianças com TDAH a melhorar suas habilidades de atenção e foco através de jogos interativos",
+    url: "https://focusplay.app",
+    siteName: "FocusPlay",
+    images: [
+      {
+        url: "/og-image.jpg", // Você pode adicionar uma imagem OG
+        width: 1200,
+        height: 630,
+        alt: "FocusPlay - Jogos para melhorar atenção e foco",
+      },
+    ],
+    locale: "pt_BR",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "FocusPlay - Terapia Digital para TDAH",
+    description: "App de terapia digital que ajuda crianças com TDAH a melhorar suas habilidades de atenção e foco através de jogos interativos",
+    images: ["/og-image.jpg"],
+    creator: "@focusplayapp", // Substitua pelo seu Twitter
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
+  },
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+    apple: "/icon.svg",
+  },
+  manifest: "/manifest.json",
 };
 
 export default function RootLayout({
@@ -30,6 +83,9 @@ export default function RootLayout({
     <html lang="pt-BR">
       <head>
         <Script src="/lasy-bridge.js" strategy="beforeInteractive" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+        <meta name="theme-color" content="#8B5CF6" />
+        <link rel="apple-touch-icon" href="/icon.svg" />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
